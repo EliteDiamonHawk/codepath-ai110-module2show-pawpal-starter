@@ -2,8 +2,11 @@ classDiagram
     class Owner {
         +str name
         +int available_minutes
+        +time day_start
+        +time day_end
         +List~Pet~ pets
         +add_pet(pet: Pet) None
+        +get_tasks_by_pet_name(name: str) List~Task~
     }
 
     class Pet {
@@ -12,25 +15,37 @@ classDiagram
         +List~Task~ tasks
         +add_task(task: Task) None
         +get_tasks_by_priority() List~Task~
+        +complete_task(task: Task) Task
+        +filter_tasks_by_completion(is_complete: bool) List~Task~
     }
 
     class Task {
         +str title
         +int duration_minutes
         +str priority
+        +date due_date
+        +time scheduled_time
         +bool reoccurring_weekly
-        +bool reorccuring_daily
+        +bool reoccurring_daily
         +bool is_scheduled
+        +bool is_complete
+        +mark_complete() None
+        +next_occurrence() Task
         +__lt__(other: Task) bool
-        +mark_complete()
     }
 
     class Scheduler {
         +Owner owner
         +Pet pet
+        +day_minutes() int
+        +sort_by_time() List~Task~
+        +sort_by_duration() List~Task~
+        +detect_conflicts() List~str~
         +generate_plan() Schedule
-        +_fits_in_time(task: Task, remaining: int) bool
-        +_sort_tasks(tasks: List~Task~) List~Task~
+        -_minutes_between(start: time, end: time) int
+        -_in_window(task: Task) bool
+        -_fits_in_time(task: Task, remaining: int) bool
+        -_sort_tasks(tasks: List~Task~) List~Task~
     }
 
     class Schedule {
@@ -46,3 +61,5 @@ classDiagram
     Scheduler --> Owner : uses
     Scheduler --> Pet : plans for
     Scheduler --> Schedule : produces
+    Scheduler ..> Task : reads/schedules
+    Task ..> Task : next_occurrence creates
