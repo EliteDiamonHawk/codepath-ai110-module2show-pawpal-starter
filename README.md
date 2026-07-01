@@ -88,14 +88,15 @@ Sample test output:
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
-
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Sort by scheduled time | `Scheduler.sort_by_time()` | Returns the pet's tasks ordered by `Task.scheduled_time`; tasks with no scheduled time sort to the end |
+| Sort by duration | `Scheduler.sort_by_duration()` | Returns the pet's tasks ordered shortest to longest by `Task.duration_minutes` |
+| Filter by completion status | `Pet.filter_tasks_by_completion(is_complete)` | Pass `True` for completed tasks, `False` for incomplete |
+| Filter by pet name | `Owner.get_tasks_by_pet_name(name)` | Returns all tasks belonging to the named pet; returns `[]` if no pet matches |
+| Conflict detection | `Scheduler.detect_conflicts()` | Scans all pets under the owner and returns a warning string for every `scheduled_time` shared by two or more tasks; returns an empty list when there are no conflicts |
+| Recurring task scheduling | `Task.next_occurrence()` | Returns a fresh, incomplete copy of the task with a `due_date` of today + 1 day (daily) or today + 7 days (weekly); returns `None` for one-off tasks |
+| Complete and reschedule | `Pet.complete_task(task)` | Marks the task complete and automatically appends the next occurrence to the pet's task list if the task recurs |
 
 ## 📸 Demo Walkthrough
 
