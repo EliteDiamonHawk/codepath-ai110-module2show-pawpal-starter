@@ -11,8 +11,14 @@ class Task:
     reoccurring_weekly: bool = False
     reoccurring_daily: bool = False
     is_scheduled: bool = False
+    is_complete: bool = False
+
+    def mark_complete(self) -> None:
+        """Mark this task as completed."""
+        self.is_complete = True
 
     def __lt__(self, other: Task) -> bool:
+        """Compare tasks by priority order (high < medium < low)."""
         priority_order = {"high": 0, "medium": 1, "low": 2}
         return priority_order.get(self.priority, 99) < priority_order.get(other.priority, 99)
 
@@ -24,9 +30,11 @@ class Pet:
     tasks: List[Task] = field(default_factory=list)
 
     def add_task(self, task: Task) -> None:
+        """Add a task to this pet's task list."""
         self.tasks.append(task)
 
     def get_tasks_by_priority(self) -> List[Task]:
+        """Return this pet's tasks sorted from highest to lowest priority."""
         return sorted(self.tasks)
 
 
@@ -37,6 +45,7 @@ class Owner:
     pets: List[Pet] = field(default_factory=list)
 
     def add_pet(self, pet: Pet) -> None:
+        """Add a pet to this owner's pet list."""
         self.pets.append(pet)
 
 
@@ -48,6 +57,7 @@ class Schedule:
     explanation: str = ""
 
     def summary(self) -> str:
+        """Return a formatted string summarizing scheduled and skipped tasks."""
         lines = []
         if self.scheduled_tasks:
             lines.append("Scheduled tasks:")
@@ -69,12 +79,15 @@ class Scheduler:
         self.pet = pet
 
     def _fits_in_time(self, task: Task, remaining: int) -> bool:
+        """Return True if the task duration fits within the remaining time."""
         return task.duration_minutes <= remaining
 
     def _sort_tasks(self, tasks: List[Task]) -> List[Task]:
+        """Return tasks sorted by priority."""
         return sorted(tasks)
 
     def generate_plan(self) -> Schedule:
+        """Build and return a Schedule by greedily fitting tasks into available time."""
         sorted_tasks = self._sort_tasks(self.pet.tasks)
         remaining = self.owner.available_minutes
         schedule = Schedule()

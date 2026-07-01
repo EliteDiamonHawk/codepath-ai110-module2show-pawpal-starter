@@ -13,9 +13,10 @@ I created a uml design with five classes. There is Owner, Schedule, Pet, Task, a
 
 
 **b. Design changes**
-
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
+
+No change based on AI suggestions
 
 ---
 
