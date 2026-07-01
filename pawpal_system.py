@@ -50,8 +50,19 @@ class Pet:
     species: str
     tasks: List[Task] = field(default_factory=list)
 
+    def has_task_named(self, title: str) -> bool:
+        """Return True if this pet already has a task with the given title (case-insensitive)."""
+        normalized = title.strip().casefold()
+        return any(t.title.strip().casefold() == normalized for t in self.tasks)
+
     def add_task(self, task: Task) -> None:
-        """Add a task to this pet's task list."""
+        """Add a task to this pet's task list.
+
+        Raises ValueError if this pet already has a task with the same title,
+        since a pet's tasks are looked up and displayed by title.
+        """
+        if self.has_task_named(task.title):
+            raise ValueError(f"{self.name} already has a task named '{task.title}'.")
         self.tasks.append(task)
 
     def get_tasks_by_priority(self) -> List[Task]:

@@ -17,12 +17,15 @@ def _parse_time(s: str | None) -> dt_time | None:
 def build_pet_obj(pet_name: str, pet_d: dict) -> Pet:
     pet_obj = Pet(name=pet_name, species=pet_d["species"])
     for t in pet_d["tasks"]:
-        pet_obj.add_task(Task(
+        task = Task(
             title=t["title"],
             duration_minutes=t["duration_minutes"],
             priority=t["priority"],
             scheduled_time=_parse_time(t.get("scheduled_time")),
-        ))
+        )
+        if t.get("is_complete"):
+            task.mark_complete()
+        pet_obj.tasks.append(task)
     return pet_obj
 
 st.title("🐾 PawPal+")
@@ -34,6 +37,9 @@ if "profiles" not in st.session_state:
 
 if "active_profile" not in st.session_state:
     st.session_state.active_profile = None
+
+if "generated_schedules" not in st.session_state:
+    st.session_state.generated_schedules = {}  # {owner_name: {"warnings": [...], "scheduled_rows": [...], ...}}
 
 # ── Owner Profiles ────────────────────────────────────────────────────────────
 
@@ -175,13 +181,20 @@ with col_time:
 col_add, col_clear = st.columns(2)
 with col_add:
     if st.button("Add task", use_container_width=True):
-        task_entry = {
-            "title": task_title,
-            "duration_minutes": int(duration),
-            "priority": priority,
-            "scheduled_time": scheduled_time_input.strftime("%H:%M") if use_time else None,
-        }
-        pet_data["tasks"].append(task_entry)
+        title = task_title.strip()
+        if not title:
+            st.warning("Task title cannot be empty.")
+        elif any(t["title"].strip().casefold() == title.casefold() for t in pet_data["tasks"]):
+            st.warning(f"{selected_pet} already has a task named '{title}'.")
+        else:
+            task_entry = {
+                "title": title,
+                "duration_minutes": int(duration),
+                "priority": priority,
+                "scheduled_time": scheduled_time_input.strftime("%H:%M") if use_time else None,
+                "is_complete": False,
+            }
+            pet_data["tasks"].append(task_entry)
 with col_clear:
     if st.button("Clear tasks", use_container_width=True):
         pet_data["tasks"] = []
@@ -209,6 +222,7 @@ if pet_data["tasks"]:
     table_rows = [
         {
             "": PRIORITY_EMOJI.get(t.priority, ""),
+            "Done": "✅" if t.is_complete else "—",
             "Task": t.title,
             "Time": t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "—",
             "Duration (min)": t.duration_minutes,
@@ -217,6 +231,29 @@ if pet_data["tasks"]:
         for t in display_tasks
     ]
     st.table(table_rows)
+
+    incomplete_titles = [t["title"] for t in pet_data["tasks"] if not t.get("is_complete")]
+    if incomplete_titles:
+        col_task, col_btn = st.columns([3, 1])
+        with col_task:
+            task_to_complete = st.selectbox("Mark a task complete", incomplete_titles)
+        with col_btn:
+            st.write("")
+            if st.button("Mark complete", use_container_width=True):
+                for t in pet_data["tasks"]:
+                    if t["title"] == task_to_complete:
+                        t["is_complete"] = True
+                        break
+                # Keep the already-generated schedule's Done column in sync
+                # instead of forcing the user to regenerate it.
+                stored = st.session_state.generated_schedules.get(st.session_state.active_profile)
+                if stored:
+                    for row in stored["scheduled_rows"] + stored["skipped_rows"]:
+                        if row["Pet"] == selected_pet and row["Task"] == task_to_complete:
+                            row["Done"] = "✅"
+                st.rerun()
+    else:
+        st.caption("All tasks for this pet are complete. 🎉")
 else:
     st.info(f"No tasks for {selected_pet} yet.")
 
@@ -253,9 +290,10 @@ if st.button("Generate schedule for all pets", type="primary"):
             for warning in conflict_checker.detect_conflicts():
                 st.warning(warning)
 
-        # Build a combined pet with all tasks; track pet name per task via id()
+        # Build a combined pet with all tasks; track pet name + completion per task via id()
         combined_pet = Pet(name="All Pets", species="combined")
         task_pet_map: dict[int, str] = {}
+        task_done_map: dict[int, bool] = {}
         for pn, pd in pets.items():
             for t_dict in pd["tasks"]:
                 task = Task(
@@ -264,8 +302,11 @@ if st.button("Generate schedule for all pets", type="primary"):
                     priority=t_dict["priority"],
                     scheduled_time=_parse_time(t_dict.get("scheduled_time")),
                 )
-                combined_pet.add_task(task)
+                # Use direct append (not add_task) since the duplicate-name
+                # guard is scoped per-pet, not across this synthetic combined pet.
+                combined_pet.tasks.append(task)
                 task_pet_map[id(task)] = pn
+                task_done_map[id(task)] = bool(t_dict.get("is_complete"))
 
         combined_owner = Owner(
             name=st.session_state.active_profile,
@@ -275,41 +316,44 @@ if st.button("Generate schedule for all pets", type="primary"):
         )
         schedule = Scheduler(owner=combined_owner, pet=combined_pet).generate_plan()
 
-        if schedule.scheduled_tasks:
-            st.success(
-                f"✅ {len(schedule.scheduled_tasks)} task(s) scheduled across all pets — "
-                f"{schedule.total_duration} of {owner_data['available_minutes']} min "
-                f"({owner_data.get('day_start', '08:00')}–{owner_data.get('day_end', '20:00')})"
-            )
-            scheduled_rows = [
-                {
-                    "": PRIORITY_EMOJI.get(t.priority, ""),
-                    "Pet": task_pet_map.get(id(t), "?"),
-                    "Task": t.title,
-                    "Time": t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "—",
-                    "Duration (min)": t.duration_minutes,
-                    "Priority": t.priority,
-                }
-                for t in schedule.scheduled_tasks
-            ]
-            st.table(scheduled_rows)
-        else:
-            st.error(f"❌ No tasks fit within {owner_data['available_minutes']} available minutes.")
+        def _row(t):
+            return {
+                "": PRIORITY_EMOJI.get(t.priority, ""),
+                "Done": "✅" if task_done_map.get(id(t)) else "—",
+                "Pet": task_pet_map.get(id(t), "?"),
+                "Task": t.title,
+                "Time": t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "—",
+                "Duration (min)": t.duration_minutes,
+                "Priority": t.priority,
+            }
 
-        if schedule.skipped_tasks:
-            with st.expander(f"⏭ {len(schedule.skipped_tasks)} skipped task(s) — not enough time"):
-                skipped_rows = [
-                    {
-                        "": PRIORITY_EMOJI.get(t.priority, ""),
-                        "Pet": task_pet_map.get(id(t), "?"),
-                        "Task": t.title,
-                        "Time": t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "—",
-                        "Duration (min)": t.duration_minutes,
-                        "Priority": t.priority,
-                    }
-                    for t in schedule.skipped_tasks
-                ]
-                st.table(skipped_rows)
+        # Persist the generated schedule so switching pets or marking a task
+        # complete elsewhere on the page doesn't clear this section.
+        st.session_state.generated_schedules[st.session_state.active_profile] = {
+            "available_minutes": owner_data["available_minutes"],
+            "day_start": owner_data.get("day_start", "08:00"),
+            "day_end": owner_data.get("day_end", "20:00"),
+            "total_duration": schedule.total_duration,
+            "scheduled_rows": [_row(t) for t in schedule.scheduled_tasks],
+            "skipped_rows": [_row(t) for t in schedule.skipped_tasks],
+        }
 
-        remaining = owner_data["available_minutes"] - schedule.total_duration
-        st.info(f"⏱ {remaining} min remaining after scheduling")
+if st.session_state.active_profile in st.session_state.generated_schedules:
+    stored = st.session_state.generated_schedules[st.session_state.active_profile]
+
+    if stored["scheduled_rows"]:
+        st.success(
+            f"✅ {len(stored['scheduled_rows'])} task(s) scheduled across all pets — "
+            f"{stored['total_duration']} of {stored['available_minutes']} min "
+            f"({stored['day_start']}–{stored['day_end']})"
+        )
+        st.table(stored["scheduled_rows"])
+    else:
+        st.error(f"❌ No tasks fit within {stored['available_minutes']} available minutes.")
+
+    if stored["skipped_rows"]:
+        with st.expander(f"⏭ {len(stored['skipped_rows'])} skipped task(s) — not enough time"):
+            st.table(stored["skipped_rows"])
+
+    remaining = stored["available_minutes"] - stored["total_duration"]
+    st.info(f"⏱ {remaining} min remaining after scheduling")

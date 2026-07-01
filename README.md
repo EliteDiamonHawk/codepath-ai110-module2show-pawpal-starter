@@ -42,6 +42,16 @@ pip install -r requirements.txt
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
 
+## Features
+
+- **Greedy daily plan generation** (`Scheduler.generate_plan`) — walks tasks in sorted order and packs each one into the owner's remaining time budget if it fits; tasks whose `scheduled_time` falls outside the owner's day window, or that no longer fit the remaining budget, land in `skipped_tasks` instead. Produces a plain-language explanation of the outcome (window, minutes used, tasks skipped).
+- **Multi-key task sorting** — `Scheduler._sort_tasks` orders tasks by `scheduled_time` first (unscheduled tasks last), then breaks ties by priority (high → medium → low). Standalone `sort_by_time` and `sort_by_duration` helpers provide chronological and shortest-duration-first views. `Task.__lt__` defines a priority ordering used by `Pet.get_tasks_by_priority`.
+- **Time-window validation** — `Scheduler._in_window` checks a task's `scheduled_time` against the owner's `day_start`/`day_end` before it's eligible for scheduling.
+- **Cross-pet conflict detection** (`Scheduler.detect_conflicts`) — buckets every scheduled task across all of an owner's pets by `scheduled_time` and flags any time slot shared by two or more tasks (whether from the same pet or different pets).
+- **Recurring task generation** (`Task.next_occurrence`) — given a completed daily or weekly task, produces a fresh, incomplete copy due one day or one week later; non-recurring tasks return `None`. `Pet.complete_task` ties this together by marking a task complete and auto-appending its next occurrence.
+- **Completion filtering** (`Pet.filter_tasks_by_completion`) — returns the subset of a pet's tasks matching a given completion state.
+- **Lookup by pet name** (`Owner.get_tasks_by_pet_name`) — returns a named pet's task list, or an empty list if the pet doesn't exist.
+
 ## 🖥️ Sample Output
 
 Paste a sample of your app's CLI or Streamlit output here so a reader can see what a generated plan looks like:
@@ -134,12 +144,120 @@ tests/test_pawpal.py::test_filter_tasks_complete_only PASSED             [100%]
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
+### UI features
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+The Streamlit app (`app.py`) is organized into four sections:
+
+- **Owner Profile** — create, switch between, or delete owner profiles. Each profile stores a name, an available-minutes budget, and a `day_start`/`day_end`.
+- **My Pets** — add or remove pets (name + species) under the active profile.
+- **Tasks** — for the selected pet, add a task (title, duration, priority, and an optional scheduled time), clear all of a pet's tasks, and view them in a table sorted by either priority or duration.
+- **Generate Schedule** — build a plan across *all* pets under the active profile at once: shows any conflict warnings, a table of scheduled tasks (tagged by pet), an expandable list of skipped tasks, and the remaining minutes left in the day.
+
+### Example workflow
+
+1. Under **Owner Profile**, enter a name (e.g. "Alex"), set a day window (08:00–20:00), and an available-minutes budget (e.g. 90), then click **Save profile**.
+2. Under **My Pets**, add a pet (e.g. "Biscuit", species "dog").
+3. Under **Tasks**, add a few tasks for Biscuit — e.g. "Morning walk" (30 min, high priority, time 08:00), "Feed breakfast" (10 min, high priority), "Brush fur" (15 min, medium priority). The task table updates live and can be re-sorted by priority or duration.
+4. Repeat steps 2–3 for a second pet (e.g. "Luna" the cat) to see multi-pet behavior.
+5. Click **Generate schedule for all pets** under **Generate Schedule** to view today's combined plan.
+
+### Key Scheduler behaviors shown
+
+- **Sorting** — the task table under **Tasks** re-orders instantly when switching the "Sort tasks by" radio between Priority and Duration, backed by `Pet.get_tasks_by_priority()` and `Scheduler.sort_by_duration()`.
+- **Conflict warnings** — if two tasks (on the same pet or different pets) share the same `scheduled_time`, `Scheduler.detect_conflicts()` surfaces a `st.warning` banner above the schedule before the plan is generated.
+- **Greedy plan generation** — `Scheduler.generate_plan()` fills the available-minutes budget in sorted order, skipping any task that no longer fits or falls outside the day window, then reports scheduled vs. skipped tasks and remaining minutes.
+
+### Sample CLI output (`python main.py`)
+
+```
+========================================
+        TODAY'S SCHEDULE
+========================================
+
+[ Biscuit the Dog ]
+Scheduled tasks:
+  - Morning walk (30 min) [high]
+  - Feed breakfast (10 min) [high]
+  - Brush fur (15 min) [medium]
+Total scheduled time: 55 min
+
+Day window: 08:00–20:00 (90 min). Scheduled 3 task(s) using 55 min. 0 task(s) skipped.
+
+[ Luna the Cat ]
+Scheduled tasks:
+  - Clean litter box (10 min) [high]
+  - Playtime (20 min) [medium]
+  - Vet checkup (60 min) [low]
+Total scheduled time: 90 min
+
+Day window: 08:00–20:00 (90 min). Scheduled 3 task(s) using 90 min. 0 task(s) skipped.
+
+========================================
+     SORT BY DURATION (shortest first)
+========================================
+
+[ Biscuit ]
+  15 min  -  Brush fur
+  30 min  -  Morning walk
+  10 min  -  Feed breakfast
+
+[ Luna ]
+  60 min  -  Vet checkup
+  20 min  -  Playtime
+  10 min  -  Clean litter box
+
+========================================
+       FILTER BY COMPLETION STATUS
+========================================
+
+[ Biscuit ]
+  Completed (1):
+    + Brush fur
+  Incomplete (2):
+    - Morning walk
+    - Feed breakfast
+
+[ Luna ]
+  Completed (1):
+    + Clean litter box
+  Incomplete (2):
+    - Vet checkup
+    - Playtime
+
+========================================
+      FILTER TASKS BY PET NAME
+========================================
+
+  Biscuit: ['Brush fur', 'Morning walk', 'Feed breakfast']
+
+  Luna: ['Vet checkup', 'Playtime', 'Clean litter box']
+
+  Unknown: no pet found
+
+========================================
+
+========================================
+       DAY WINDOW DEMOS
+========================================
+
+day_minutes() for 08:00-20:00: 720 min  (expected 720)
+
+Task at 09:00 (window 08-20) -> scheduled: ['Morning walk']
+  skipped: []
+
+Task at 22:00 (window 08-20) -> scheduled: []
+  skipped: ['Late snack']
+
+avail=30 min (window 720 min), tasks 30+20 min:
+  scheduled: ['Walk']  total=30 min
+  skipped:   ['Feed']
+
+Mixed tasks (in-window timed + out-of-window timed + untimed):
+  scheduled: ['Morning walk', 'Brush']
+  skipped:   ['Late snack']
+  Day window: 08:00–20:00 (720 min). Scheduled 2 task(s) using 35 min. 1 task(s) skipped.
+
+========================================
+```
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
