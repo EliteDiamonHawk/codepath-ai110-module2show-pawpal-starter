@@ -78,6 +78,8 @@ class Pet:
 class Owner:
     name: str
     available_minutes: int
+    day_start: time = field(default_factory=lambda: time(8, 0))
+    day_end: time = field(default_factory=lambda: time(20, 0))
     pets: List[Pet] = field(default_factory=list)
 
     def add_pet(self, pet: Pet) -> None:
@@ -120,6 +122,20 @@ class Scheduler:
     def __init__(self, owner: Owner, pet: Pet):
         self.owner = owner
         self.pet = pet
+
+    @staticmethod
+    def _minutes_between(start: time, end: time) -> int:
+        return (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
+
+    def day_minutes(self) -> int:
+        """Total minutes in the owner's day window."""
+        return self._minutes_between(self.owner.day_start, self.owner.day_end)
+
+    def _in_window(self, task: Task) -> bool:
+        """Return True if the task's scheduled_time (if set) falls within the day window."""
+        if task.scheduled_time is None:
+            return True
+        return self.owner.day_start <= task.scheduled_time <= self.owner.day_end
 
     def _fits_in_time(self, task: Task, remaining: int) -> bool:
         """Return True if the task duration fits within the remaining time."""
@@ -166,13 +182,18 @@ class Scheduler:
         return warnings
 
     def generate_plan(self) -> Schedule:
-        """Build and return a Schedule by greedily fitting tasks into available time."""
+        """Build and return a Schedule by greedily fitting tasks into the day window."""
         sorted_tasks = self._sort_tasks(self.pet.tasks)
-        remaining = self.owner.available_minutes
+        budget = self.owner.available_minutes
+        remaining = budget
         schedule = Schedule()
 
         for task in sorted_tasks:
-            if self._fits_in_time(task, remaining):
+            if not self._in_window(task):
+                task_copy = task  # keep reference for skipped list
+                task_copy.is_scheduled = False
+                schedule.skipped_tasks.append(task_copy)
+            elif self._fits_in_time(task, remaining):
                 task.is_scheduled = True
                 schedule.scheduled_tasks.append(task)
                 schedule.total_duration += task.duration_minutes
@@ -180,9 +201,12 @@ class Scheduler:
             else:
                 schedule.skipped_tasks.append(task)
 
+        window_str = (
+            f"{self.owner.day_start.strftime('%H:%M')}–{self.owner.day_end.strftime('%H:%M')}"
+        )
         schedule.explanation = (
-            f"Scheduled {len(schedule.scheduled_tasks)} task(s) for {self.pet.name} "
-            f"using {schedule.total_duration} of {self.owner.available_minutes} available minutes. "
-            f"{len(schedule.skipped_tasks)} task(s) skipped due to time constraints."
+            f"Day window: {window_str} ({budget} min). "
+            f"Scheduled {len(schedule.scheduled_tasks)} task(s) using {schedule.total_duration} min. "
+            f"{len(schedule.skipped_tasks)} task(s) skipped."
         )
         return schedule
